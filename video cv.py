@@ -121,6 +121,7 @@ class GaugeData:
     min_value:              float =                 2
     max_value:              float =                 60
     res:                    int =                   2
+    unit:                   str =                   "mca"
 
     total_angle_span:       float =                 0.0
     current_read:           float =                 0.0
@@ -168,6 +169,7 @@ class GaugeData:
         self.warning_max_instant = False
         self.current_read = 0.0
         self.total_angle_span = 0.0
+
 # ========================
 # ESTADO DE PROCESSAMENTO
 # ============================================================================
@@ -218,7 +220,7 @@ class CameraCalibrator:
         x, y, w, h = self.roi
         return undistorted[y:y+h, x:x+w]
 
-# =========================+
+# ================
 # ANGLE CALCULATOR
 # ============================================================================
 
@@ -239,6 +241,7 @@ class AngleCalculator:
 
         angle_rad = math.atan2(dy, dx)
         angle_deg = math.degrees(angle_rad)
+         
         if angle_deg < 0:
             angle_deg += 360
         elif angle_deg == 0:
@@ -258,11 +261,9 @@ class AngleCalculator:
         point1, center1 = line1
         point2, center2 = line2
         
-        v1 = np.array([point1[0] - center1[0], point1[1] - center1[1]], dtype=np.float64)
-        v2 = np.array([point2[0] - center2[0], point2[1] - center2[1]], dtype=np.float64)
+        v1,v2 = np.array([point1[0] - center1[0], point1[1] - center1[1]], dtype=np.float64), np.array([point2[0] - center2[0], point2[1] - center2[1]], dtype=np.float64)
         
-        v1_norm = v1 / np.linalg.norm(v1)
-        v2_norm = v2 / np.linalg.norm(v2)
+        v1_norm, v2_norm = v1 / np.linalg.norm(v1), v2 / np.linalg.norm(v2)
         
         dot = np.clip(np.dot(v1_norm, v2_norm), -1.0, 1.0)
         angle_magnitude = np.degrees(np.arccos(dot))
@@ -294,7 +295,6 @@ class AngleCalculator:
         dx, dy = x2 - x1,  y2 - y1
 
         fx, fy = x1 - cx, y1 - cy
-        
         a = dx*dx + dy*dy
         b = 2*(fx*dx + fy*dy)
         c = (fx*fx + fy*fy) - r*r
@@ -320,7 +320,6 @@ class AngleCalculator:
 # ============================================================================
 
 class ImageProcessor:
-    """Core image processing utilities"""
     
     def __init__(self, params: ProcessingParams, app: 'GaugeReaderApp' = None):
         self.params = params
@@ -346,11 +345,8 @@ class ImageProcessor:
             
             ###### CASTRO 25/02/2026 - FIXEI A ÁREA EM 5 MAS TALVEZ TENHA DE REDUZIR PARA INDICADORES COM TRAÇOS MAIS FINOS
             if area:
-                x = stats[label, cv2.CC_STAT_LEFT]
-                y = stats[label, cv2.CC_STAT_TOP]
-                w = stats[label, cv2.CC_STAT_WIDTH]
-                h = stats[label, cv2.CC_STAT_HEIGHT]
-                
+                x,y,w,h = stats[label, cv2.CC_STAT_LEFT],  stats[label, cv2.CC_STAT_TOP],stats[label, cv2.CC_STAT_WIDTH],stats[label, cv2.CC_STAT_HEIGHT]
+
                 centroid = (int(centroids[label][0]), int(centroids[label][1]))
                 component_centroids.append(centroid)
                 
@@ -359,14 +355,7 @@ class ImageProcessor:
                 else:
                     original_centroid = centroid
 
-                line = LineData(
-                    centroid=original_centroid,
-                    center=gauge_data.center,
-                    absolute_angle=self.angle_calculator.calculate_angle_from_vector(
-                        original_centroid[0] - gauge_data.center[0],
-                        original_centroid[1] - gauge_data.center[1]
-                    )
-                )
+                line = LineData( centroid=original_centroid, center=gauge_data.center, absolute_angle=self.angle_calculator.calculate_angle_from_vector( original_centroid[0] - gauge_data.center[0], original_centroid[1] - gauge_data.center[1] ) )
 
                 self._calculate_line_intersection(line, gauge_data)
                 
@@ -399,7 +388,7 @@ class ImageProcessor:
             for i, region in enumerate(stats[0:50]):
                 x, y, w, h = region[cv2.CC_STAT_LEFT:cv2.CC_STAT_HEIGHT+1]
                 cv2.rectangle(display_img, (x, y), (x + w, y + h), (255, 0, 0), 1)
-            cv2.imshow('detected_regions', display_img)
+            #cv2.imshow('detected_regions', display_img)
     
     def draw_lines_on_frame(self, result_frame: np.ndarray, original_frame: np.ndarray, lines: List[LineData], gauge_data: GaugeData):
         ###### CASTRO 25/02/2026 - ESTA FUNÇÃO AGORA DESENHA AS LINHAS PERMANENTES
@@ -411,8 +400,8 @@ class ImageProcessor:
                 ###### CASTRO 25/02/2026 - A LINHA CINZA-CLARO RESSALTA QUAIS REGIÕES SERÃO UTILIZADAS PARA CONTABILIZAR
                 cv2.line(result_frame, line.center, line.extended_end, (200, 200, 200), 1)
                 
-                if line.circle_intersection:
-                    cv2.circle(result_frame, line.circle_intersection, 3, (255, 255, 0), -1)
+                #if line.circle_intersection:
+                    #cv2.circle(result_frame, line.circle_intersection, 3, (255, 255, 0), -1)
                 
                 ###### CASTRO 25/02/2026 - AGORA VEM O RESULTADO DA RESOLUÇÃO
                 cv2.putText(result_frame, str(line.res), line.extended_end_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
@@ -490,7 +479,6 @@ class RingProcessor:
         
         gray = self.image_processor.convert_to_gray(ring_img)
         _, output_thresh = cv2.threshold(gray, self.params.ring_thresh_low,self.params.ring_thresh_high, cv2.THRESH_BINARY)
-        
         lines = self.image_processor.analyze_ring(ring_img, offset, self.app.gauge_data, result_frame, self.app.frame)
         
         return lines
@@ -504,21 +492,11 @@ class NeedleDetector:
         self.params = params
         self.app = app
         self.ring_processor = RingProcessor(params, self)
-        self.backSub = cv2.createBackgroundSubtractorMOG2(
-            history=params.history,
-            varThreshold=params.var_threshold,
-            detectShadows=True
-        )
+        self.backSub = cv2.createBackgroundSubtractorMOG2(history=params.history,varThreshold=params.var_threshold,detectShadows=True)
     
     def detect_circle(self, gray: np.ndarray, roi_config: Optional[ROIConfig] = None) -> Optional[Tuple[int, int, int]]:
         if roi_config and roi_config.selected:
             return (roi_config.center_x, roi_config.center_y, roi_config.radius)
-        
-        circles = cv2.HoughCircles(
-            gray, cv2.HOUGH_GRADIENT, self.params.dp, self.params.distance,
-            param1=self.params.param1, param2=self.params.param2,
-            minRadius=self.params.min_radius, maxRadius=self.params.max_radius
-        )
         
         if circles is not None:
             circles = np.round(circles[0, :]).astype("int")
@@ -526,24 +504,31 @@ class NeedleDetector:
             return (x, y, int(r * 0.9))
         
         return None
-    
-    def extract_needle(self, frame: np.ndarray, circle_data: Tuple[int, int, int], mask: np.ndarray, gauge_data: GaugeData) -> Optional[NeedleData]:
+    def extract_needle(self, frame: np.ndarray, circle_data: Tuple[int, int, int], mask: np.ndarray, gauge_data: GaugeData, offset: Optional[Tuple[int, int]] = None) -> Optional[NeedleData]:
+        
         x, y, r = circle_data
+        
+        if offset:
+            local_x, local_y, local_r = x - offset[0], y - offset[1], r
+        else:
+            local_x, local_y, local_r = x, y, r
+        
+        h, w = frame.shape[:2]
+        local_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.circle(local_mask, (local_x, local_y), local_r, 255, -1)
         
         fg_mask_full = self.backSub.apply(frame)
         
-        cv2.circle(mask, (x, y), r, 255, -1)
-        fg_mask_circular = cv2.bitwise_and(fg_mask_full, fg_mask_full, mask=mask)
+        fg_mask_circular =  cv2.bitwise_and(fg_mask_full, fg_mask_full, mask=local_mask)
         
-        _, mask_thresh = cv2.threshold(fg_mask_circular, self.params.thresh_value,self.params.thresh_value2, cv2.THRESH_BINARY)
+        _, mask_thresh =    cv2.threshold(fg_mask_circular, self.params.thresh_value,self.params.thresh_value2, cv2.THRESH_BINARY)
         
-        cv2.imshow('mask_thresh', mask_thresh)
+        #cv2.imshow('mask_thresh', mask_thresh)
         
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
-        mask_eroded = cv2.morphologyEx(mask_thresh, cv2.MORPH_OPEN, kernel)
+        kernel =            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
+        mask_eroded =       cv2.morphologyEx(mask_thresh, cv2.MORPH_OPEN, kernel)
         
-        contours, _ = cv2.findContours(mask_eroded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        
+        contours, _ =       cv2.findContours(mask_eroded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         large_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > self.params.min_contour_area]
         
         if not large_contours:
@@ -555,9 +540,9 @@ class NeedleDetector:
         for cnt in large_contours:
             x_rect, y_rect, w, h = cv2.boundingRect(cnt)
             contour_center = (x_rect + w//2, y_rect + h//2)
-            dist = np.sqrt((contour_center[0] - x)**2 + (contour_center[1] - y)**2)
+            dist = np.sqrt((contour_center[0] - local_x)**2 + (contour_center[1] - local_y)**2)
             
-            if dist <= r:
+            if dist <= local_r:
                 cv2.rectangle(frame, (x_rect, y_rect), (x_rect + w, y_rect + h), (0, 0, 255), 1)
                 cv2.rectangle(rectangle_mask, (x_rect, y_rect), (x_rect + w, y_rect + h), 255, -1)
         
@@ -565,9 +550,9 @@ class NeedleDetector:
         indices = np.where(masked_canny > 0)
         
         for px, py in zip(indices[1], indices[0]):
-            dist = np.sqrt((px - x)**2 + (py - y)**2)
+            dist = np.sqrt((px - local_x)**2 + (py - local_y)**2)
             if (py < rectangle_mask.shape[0] and px < rectangle_mask.shape[1] and 
-                rectangle_mask[py, px] > 0 and dist <= r):
+                rectangle_mask[py, px] > 0 and dist <= local_r):
                 all_points.append([px, py])
         
         if len(all_points) < 20:
@@ -581,7 +566,7 @@ class NeedleDetector:
         
         centroid = (int(x0[0]), int(y0[0]))
         
-        dx, dy = centroid[0] - x, centroid[1] - y
+        dx, dy = centroid[0] - local_x, centroid[1] - local_y
         distance = np.sqrt(dx*dx + dy*dy)
         
         if distance <= 0:
@@ -589,25 +574,31 @@ class NeedleDetector:
         
         dx_norm, dy_norm = dx / distance, dy / distance
         
-        extension = r - distance + 0.1 * r
-        tip_x, tip_y = int(x + dx_norm * (distance + extension)), int(y + dy_norm * (distance + extension))
+        extension = local_r - distance + 0.1 * local_r
+        tip_x, tip_y = int(local_x + dx_norm * (distance + extension)), int(local_y + dy_norm * (distance + extension)) 
         
-        intersection_x, intersection_y = int(x + dx_norm * r), int(y + dy_norm * r)
+        intersection_x, intersection_y = int(local_x + dx_norm * local_r), int(local_y + dy_norm * local_r)
         
-        needle = NeedleData( 
-            centroid=centroid, 
-            tip=(tip_x, tip_y), 
-            circle_intersection=(intersection_x, intersection_y), 
-            absolute_angle=self.app.angle_calculator.calculate_angle_from_vector(tip_x - x, tip_y - y)
-        )
+        # Se tem offset, converte de volta para coordenadas originais para o NeedleData
+        if offset:
+            abs_centroid = (centroid[0] + offset[0], centroid[1] + offset[1])
+            abs_tip = (tip_x + offset[0], tip_y + offset[1])
+            abs_intersection = (intersection_x + offset[0], intersection_y + offset[1])
+            abs_center = (local_x + offset[0], local_y + offset[1])
+        else:
+            abs_centroid = centroid
+            abs_tip = (tip_x, tip_y)
+            abs_intersection = (intersection_x, intersection_y)
+            abs_center = (local_x, local_y)
+        
+        needle = NeedleData( centroid=abs_centroid, tip=abs_tip, circle_intersection=abs_intersection, absolute_angle=self.app.angle_calculator.calculate_angle_from_vector( abs_tip[0] - abs_center[0],  abs_tip[1] - abs_center[1] ) )
         
         if gauge_data.min_line:
-            needle_line = (needle.tip, (x, y))
+            needle_line = (needle.tip, abs_center)
             min_line = (gauge_data.min_line.centroid, gauge_data.min_line.center)
             needle.relative_angle = self.app.angle_calculator.relative_angle_from_min(min_line, needle_line)
         
         return needle
-    
     def process_ring(self, frame, circle_data, result_frame=None) -> List[LineData]:
         
         x, y, r = circle_data
@@ -667,36 +658,41 @@ class Visualizer:
                 if line.is_tick_mark and line.extended_end:
                     cv2.line(frame, line.center, line.extended_end, (200, 200, 200), 1)
                     
-                    if line.circle_intersection:
-                        cv2.circle(frame, line.circle_intersection, 3, (255, 255, 0), -1)
+                    #if line.circle_intersection:
+                        #cv2.circle(frame, line.circle_intersection, 3, (255, 255, 0), -1)
                     
                     cv2.putText(frame, str(line.res), line.extended_end_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
     
     @staticmethod
+    def draw_display_info(frame: np.ndarray, gauge_data: GaugeData, state: ProcessingState):
+        
+        cv2.putText(frame, str(f'{gauge_data.current_read} [{gauge_data.unit}]'), (35, 100), cv2.FONT_HERSHEY_DUPLEX, 3, (255, 255, 255), 2)
+
+        if gauge_data.warning_max_instant == True:
+            cv2.putText(frame, str(f'Warning'), (35, 225), cv2.FONT_HERSHEY_DUPLEX, 3, (0, 0, 255), 2)
+
+    @staticmethod
     def draw_info_overlay(frame: np.ndarray, gauge_data: GaugeData, state: ProcessingState):
         
         y_pos = 30
-        info_items = [
-            ("frame", f"{state.frame_counter}", "", y_pos),
-            ("abs(needle_angle)", f"{gauge_data.needle.absolute_angle:.1f}", "deg", y_pos + 30),
-        ]
+        info_items = [("frame", f"{state.frame_counter}", "", y_pos),("abs(needle_angle)", f"{gauge_data.needle.absolute_angle:.1f}", "deg", y_pos + 30),]
         
         if gauge_data.min_line:
             info_items.append(("relative_needle_angle", f"{gauge_data.needle.relative_angle:.1f}", "deg", y_pos + 60))
         
-        info_items.append(("current_read", f"{int(gauge_data.current_read)}", "unit", y_pos + 230))
-        info_items.append(("min_value", f"{int(gauge_data.min_value)}", "unit", y_pos + 260))
-        info_items.append(("max_value", f"{int(gauge_data.max_value)}", "unit", y_pos + 290))
-        info_items.append(("resolution", f"{int(gauge_data.res)}", "unit", y_pos + 320))
-        info_items.append(("bool(warning_max_instant)", f"{str(gauge_data.warning_max_instant)}", "", y_pos + 350))
-        info_items.append(("bool(warning_max_flag)", f"{str(gauge_data.warning_max_flag)}", "", y_pos + 380))
-        #info_items.append(("lines_captured", f"{str(gauge_data.lines_captured)}", "", y_pos + 410))
+        info_items.append(("current_read",                  f"{int(gauge_data.current_read)}",          "unit",     y_pos + 230))
+        info_items.append(("min_value",                     f"{int(gauge_data.min_value)}",             "unit",     y_pos + 260))
+        info_items.append(("max_value",                     f"{int(gauge_data.max_value)}",             "unit",     y_pos + 290))
+        info_items.append(("resolution",                    f"{int(gauge_data.res)}",                   "unit",     y_pos + 320))
+        info_items.append(("bool(warning_max_instant)",     f"{str(gauge_data.warning_max_instant)}",   "",         y_pos + 350))
+        info_items.append(("bool(warning_max_flag)",        f"{str(gauge_data.warning_max_flag)}",      "",         y_pos + 380))
         
         for label, value, unit, y in info_items:
             text = f"{label}: {value}"
             if unit:
                 text += f" [{unit}]"
-            cv2.putText(frame, text, (10, y), cv2.FONT_HERSHEY_DUPLEX, 0.4, (255, 255, 255), 1)
+            cv2.putText(frame, text, (10, y), cv2.FONT_HERSHEY_DUPLEX, 0.4, (255, 255, 255), )
+        cv2.rectangle(frame, (5,240),(200,270),(0,0,255),2)
     
     @staticmethod
     def draw_calibration_mode(frame: np.ndarray, stage: CalibrationStage):
@@ -739,25 +735,25 @@ class GaugeReaderApp:
         self.frame =                None
         self.circle_data =          None
 
-        self.last_needle_angle = 0
+        self.last_needle_angle =    0
 
     def process_frozen_frame_for_calibration(self):
         
         if self.state.frozen_frame is None:
-            print("No frozen frame available")
+            print(">>> NO FRAME AVAILABLE")
             return False
         
         gray = self.image_processor.convert_to_gray(self.state.frozen_frame)
         circle_data = self.needle_detector.detect_circle(gray, self.roi_config)
         
         if not circle_data:
-            print("Could not detect circle in frozen frame")
+            print(">>> COULD NOT DETECT CIRCLE IN FROZEN FRAME")
             return False
         
         x, y, r = circle_data
-        self.gauge_data.center = (x, y)
-        self.gauge_data.radius = r
-        self.gauge_data.circle_detected = True
+        self.gauge_data.center =            (x, y)
+        self.gauge_data.radius =            r
+        self.gauge_data.circle_detected =   True
         
         temp_result = np.zeros_like(self.state.frozen_frame)
         
@@ -769,7 +765,7 @@ class GaugeReaderApp:
                 lines = self.image_processor.analyze_ring(ring_cropped, offset, self.gauge_data, temp_result, self.state.frozen_frame)
                 self.gauge_data.detected_lines = lines
                 
-                print(f"len_lines: {len(lines)}")
+                print(f">>> len_lines: {len(lines)}")
                 return len(lines) > 0
         
         return False
@@ -778,27 +774,27 @@ class GaugeReaderApp:
         if self.frame is not None:
             ###### CASTRO 25/02/2026 - LIMPA TUDO PARA NOVA CALIBRAÇÃO
             self.gauge_data.permanent_lines.clear()
-            self.gauge_data.lines_captured = False
+            self.gauge_data.lines_captured =        False
             
-            self.gauge_data.min_line = None
-            self.gauge_data.max_line = None
-            self.gauge_data.is_calibrated = False
+            self.gauge_data.min_line =              None
+            self.gauge_data.max_line =              None
+            self.gauge_data.is_calibrated =         False
             
             self.gauge_data.tick_mark_angles.clear()
             self.gauge_data.scale_values.clear()
             self.gauge_data.crossed_angles.clear()
-            self.gauge_data.max_crossed = False
-            self.gauge_data.warning_max_flag = False
-            self.gauge_data.warning_max_instant = False
-            self.gauge_data.current_read = 0.0
-            self.gauge_data.total_angle_span = 0.0
+            self.gauge_data.max_crossed =           False
+            self.gauge_data.warning_max_flag =      False
+            self.gauge_data.warning_max_instant =   False
+            self.gauge_data.current_read =          0.0
+            self.gauge_data.total_angle_span =      0.0
             
-            self.last_needle_angle = 0
-            
-            self.state.frozen_frame = self.frame.copy()
-            self.state.calibration_mode = True
-            self.state.calibration_stage = CalibrationStage.SELECTING_MIN
-            self.paused = True
+            self.last_needle_angle =                0
+
+            self.state.frozen_frame =               self.frame.copy()
+            self.state.calibration_mode =           True
+            self.state.calibration_stage =          CalibrationStage.SELECTING_MIN
+            self.paused =                           True
             
             success = self.process_frozen_frame_for_calibration()
 
@@ -806,13 +802,13 @@ class GaugeReaderApp:
         self.state.calibration_mode = False
         self.state.calibration_stage = CalibrationStage.NOT_CALIBRATING
         self.paused = False
-        print("Calibration cancelled")
+        print(">>> CALIBRATION CANCELLED")
 
     def capture_permanent_lines(self):
         ###### CASTRO 25/02/2026 - CAPTURA AS LINHAS UMA ÚNICA VEZ APÓS CALIBRAÇÃO
         if self.frame is not None and self.gauge_data.circle_detected:
-            enhanced_frame = self.image_processor.enhance_image(self.frame, self.params.alpha, self.params.beta)
-            circle_data = (self.gauge_data.center[0], self.gauge_data.center[1], self.gauge_data.radius)
+            enhanced_frame =    self.image_processor.enhance_image(self.frame, self.params.alpha, self.params.beta)
+            circle_data =       (self.gauge_data.center[0], self.gauge_data.center[1], self.gauge_data.radius)
             
             lines = self.needle_detector.process_ring(enhanced_frame, circle_data, None)
             
@@ -829,22 +825,28 @@ class GaugeReaderApp:
         if not self.gauge_data.min_line or not self.gauge_data.permanent_lines:
             return
         
-        min_line_tuple = (self.gauge_data.min_line.centroid, self.gauge_data.min_line.center)
+        min_line_tuple =                (self.gauge_data.min_line.centroid, self.gauge_data.min_line.center)
         
         for line in self.gauge_data.permanent_lines:
-            line_tuple = (line.centroid, line.center)
-            line.angle_from_min = self.angle_calculator.relative_angle_from_min(min_line_tuple, line_tuple)
+            line_tuple =                (line.centroid, line.center)
+            line.angle_from_min =       self.angle_calculator.relative_angle_from_min(min_line_tuple, line_tuple)
             
             if self.gauge_data.max_line:
-                max_angle = self.gauge_data.max_line.angle_from_min
-                max_range = max_angle
-                line.is_tick_mark = (3 <= line.angle_from_min <= max_range + 3)
+                max_angle =             self.gauge_data.max_line.angle_from_min
+                max_range =             max_angle
+                ##### 26/02/2026 CASTRO - AQUI FIXEI UMA CONDIÇÃO QUE ACHO MEEIO SUSPEITA
+                ##### EM RELAÇÃO AO ÂNGULO, A LINHA VAI SER CONSIDERADA OU NÃO
+                ##### TALVEZ NO FUTURO TENHA DE REVER ESTE CRITÉRIO PARA OUTROS MANÔMETROS
+                angle_tolerance = (max_range - line.angle_from_min) * 0.01
+                line.is_tick_mark = (angle_tolerance <= line.angle_from_min <= max_range + angle_tolerance)
+                ##### ANTES ESTAVA ASSIM, NÃO SEI SE VAI ROLAR
+                #line.is_tick_mark =     (3 <= line.angle_from_min <= max_range + 3)
         
-        tick_lines = [line for line in self.gauge_data.permanent_lines if line.is_tick_mark]
+        tick_lines =            [line for line in self.gauge_data.permanent_lines if line.is_tick_mark]
         tick_lines.sort(key=lambda l: l.angle_from_min)
         
         for idx, line in enumerate(tick_lines):
-            line.res = self.gauge_data.min_value + (idx + 1) * self.gauge_data.res
+            line.res =          self.gauge_data.min_value + (idx + 1) * self.gauge_data.res
             
         self.gauge_data.update_tick_marks()
 
@@ -853,25 +855,24 @@ class GaugeReaderApp:
             return
         
         if not hasattr(self.image_processor, 'last_component_centroids'):
-            print("No region data available. Processing frame again...")
+            print(">>> NO REGION DATA AVAILABLE. PROCESSING FRAME AGAIN")
             self.process_frozen_frame_for_calibration()
             return
         
-        component_centroids = self.image_processor.last_component_centroids
-        offset = self.image_processor.last_offset
+        component_centroids =   self.image_processor.last_component_centroids
+        offset =                self.image_processor.last_offset
         
         if not component_centroids or offset is None:
-            print("No regions detected in this frame")
+            print(">>> NO REGIONS DETECTED IN THIS FRAME")
             return
         
-        nearest = self.image_processor.find_nearest_region(x, y, component_centroids, offset)
+        nearest =               self.image_processor.find_nearest_region(x, y, component_centroids, offset)
         
         if nearest is None:
-            print("No region found near click. Try clicking closer to a gray line.")
+            print(">>> NO REGION FOUND NEAR CLICK.")
             return
         
-        original_x = offset[0] + nearest[0]
-        original_y = offset[1] + nearest[1]
+        original_x, original_y = offset[0] + nearest[0], offset[1] + nearest[1]
         
         target_line = None
         for line in self.gauge_data.detected_lines:
@@ -880,50 +881,51 @@ class GaugeReaderApp:
                 break
         
         if not target_line:
-            print("Could not find matching line data")
+            print(">>> COULD NOT FIND MATCHING LINE DATA")
             return
         
-        if self.state.calibration_stage == CalibrationStage.SELECTING_MIN:
-            self.gauge_data.min_line = target_line
-            target_line.is_tick_mark = True
-            target_line.angle_from_min = 0 
-            self.state.calibration_stage = CalibrationStage.SELECTING_MAX
-            print(f"min_line: ({original_x}, {original_y})")
+        if self.state.calibration_stage ==          CalibrationStage.SELECTING_MIN:
+            self.gauge_data.min_line =              target_line
+            target_line.is_tick_mark =              True
+            target_line.angle_from_min =            0 
+            self.state.calibration_stage =          CalibrationStage.SELECTING_MAX
+            print(f">>> min_line: ({original_x}, {original_y})")
             
-        elif self.state.calibration_stage == CalibrationStage.SELECTING_MAX:
-            self.gauge_data.max_line = target_line
-            target_line.is_tick_mark = True
+        elif self.state.calibration_stage ==        CalibrationStage.SELECTING_MAX:
+            self.gauge_data.max_line =              target_line
+            target_line.is_tick_mark =              True
             
             if self.gauge_data.min_line:
-                min_line_tuple = (self.gauge_data.min_line.centroid, self.gauge_data.min_line.center)
-                max_line_tuple = (target_line.centroid, target_line.center)
-                max_angle = self.angle_calculator.relative_angle_from_min(min_line_tuple, max_line_tuple)
-                target_line.angle_from_min = max_angle
-                self.gauge_data.total_angle_span = abs(360 - max_angle)
+                min_line_tuple =                    (self.gauge_data.min_line.centroid, self.gauge_data.min_line.center)
+                max_line_tuple =                    (target_line.centroid, target_line.center)
+                max_angle =                         self.angle_calculator.relative_angle_from_min(min_line_tuple, max_line_tuple)
+                target_line.angle_from_min =        max_angle
+                self.gauge_data.total_angle_span =  max_angle
             
-            self.gauge_data.is_calibrated = True
-            self.state.calibration_mode = False
-            self.state.calibration_stage = CalibrationStage.NOT_CALIBRATING
-            self.paused = False
+            self.gauge_data.is_calibrated =         True
+            self.state.calibration_mode =           False
+            self.state.calibration_stage =          CalibrationStage.NOT_CALIBRATING
+            self.paused =                           False
             
             ###### CASTRO 25/02/2026 - APÓS CALIBRAÇÃO, CAPTURA AS LINHAS PERMANENTES
             self.capture_permanent_lines()
             
-            print(f"max_line ({original_x}, {original_y})")
-            print(f"angle_span: {self.gauge_data.total_angle_span:.1f}°")
+            print(f">>> max_line ({original_x}, {original_y})")
+            print(f">>> angle_span: {self.gauge_data.total_angle_span:.1f}°")
     
     def process_frame(self, frame: np.ndarray) -> Optional[np.ndarray]:
         
-        enhanced_frame = self.image_processor.enhance_image(frame, self.params.alpha, self.params.beta)
-        gray = self.image_processor.convert_to_gray(enhanced_frame)
+        enhanced_frame =            self.image_processor.enhance_image(frame, self.params.alpha, self.params.beta)
+        gray =                      self.image_processor.convert_to_gray(enhanced_frame)
         
-        black_foreground = np.zeros_like(frame)
+        black_foreground =          np.zeros_like(frame)
+        display =                   np.zeros((400, 850, 3),dtype=np.uint8)
         self.current_result_frame = black_foreground
-        self.frame = frame
+        self.frame =                frame
         
-        mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-        
-        circle_data = self.needle_detector.detect_circle(gray, self.roi_config)
+        mask =                      np.zeros(frame.shape[:2], dtype=np.uint8)
+
+        circle_data =               self.needle_detector.detect_circle(gray, self.roi_config)
         
         if not circle_data:
             return None
@@ -940,10 +942,18 @@ class GaugeReaderApp:
         if self.gauge_data.lines_captured and self.gauge_data.permanent_lines:
             self.visualizer.draw_permanent_lines(black_foreground, self.gauge_data)
             self.visualizer.draw_permanent_lines(frame, self.gauge_data)
-        
+
         if not self.state.calibration_mode:
-            needle = self.needle_detector.extract_needle(enhanced_frame, circle_data, mask, self.gauge_data)
+            ###### CASTRO 26/02/2026 - DALE AGORA ISOLEI O VERSO DO PONTEIRO PARA NÃO DAR FALSO-POSITIVO NA MEDIÇÃO
+            ###### CASTRO 26/02/2026 - EM ALGUMA HORA ESSAS CONSTANTES TEM DE VIRAR UM PARÂMETRO
+            inner_radius = int(r * 0.5)
+            outer_radius = int(r + r * 0.2)
             
+            ring_cropped, offset = self.image_processor.crop_ring_area(enhanced_frame, x, y, inner_radius, outer_radius)
+            #cv2.imshow('ring_cropped', ring_cropped)
+            
+            needle = self.needle_detector.extract_needle(ring_cropped, circle_data, mask, self.gauge_data, offset)
+                #cv2.imshow('enhanced_frame',enhanced_frame)
             if needle:
                 self.gauge_data.needle = needle
                 
@@ -954,39 +964,33 @@ class GaugeReaderApp:
                 if self.gauge_data.is_calibrated and self.gauge_data.tick_mark_angles:
                     
                     ###### CASTRO 25/02/2026 - ENCONTRA O VALOR CORRETO BASEADO NA POSIÇÃO DO PONTEIRO
-                    # Primeiro, ordena as linhas por ângulo
                     tick_lines = [line for line in self.gauge_data.permanent_lines if line.is_tick_mark]
                     tick_lines.sort(key=lambda l: l.angle_from_min)
                     
-                    # Encontra a linha mais próxima (ou a última ultrapassada)
-                    current_value = self.gauge_data.min_value  # Valor padrão
+                    current_value = self.gauge_data.min_value  
                     
                     for i, line in enumerate(tick_lines):
                         if needle.relative_angle >= line.angle_from_min:
-                            # Passou desta linha, atualiza o valor
                             current_value = line.res
                         else:
-                            # Ainda não passou da próxima linha, podemos parar
                             break
                     
-                    self.gauge_data.current_read = current_value  # <-- CORRETO: valor em unidade!
+                    self.gauge_data.current_read = current_value  
                     
-                    # Resto do código de crossing...
                     for tick_angle in self.gauge_data.tick_mark_angles:
                         if needle.relative_angle > tick_angle:
                             if not hasattr(self, 'last_needle_angle'):
                                 self.last_needle_angle = 0
+                            
+                            if needle.relative_angle < max(self.gauge_data.tick_mark_angles) - 15:
+                                self.gauge_data.warning_max_instant = False 
                             
                             if self.last_needle_angle <= tick_angle:
                                 if tick_angle not in self.gauge_data.crossed_angles:
                                     self.gauge_data.crossed_angles[tick_angle] = 1
                                 else:
                                     self.gauge_data.crossed_angles[tick_angle] += 1
-                                
-                                # Warnings (podem ficar aqui)
-                                if needle.relative_angle < max(self.gauge_data.tick_mark_angles) - 10:
-                                    self.gauge_data.warning_max_instant = False 
-                                
+    
                                 if (tick_angle + 10) > max(self.gauge_data.tick_mark_angles):
                                     self.gauge_data.warning_max_flag = True
                                     self.gauge_data.warning_max_instant = True
@@ -1000,15 +1004,16 @@ class GaugeReaderApp:
             self.visualizer.draw_calibration_mode(black_foreground, self.state.calibration_stage)
         
         self.visualizer.draw_info_overlay(black_foreground, self.gauge_data, self.state)
+        self.visualizer.draw_display_info(display, self.gauge_data, self.state)
         
-        return black_foreground
+        return black_foreground, display
     
     def initialize_video(self):
         
         self.cap = cv2.VideoCapture(self.video_path)
         
         if not self.cap.isOpened():
-            raise ValueError(f"Could not open video file: {self.video_path}")
+            raise ValueError(f">>> COULD NOT OPEN VIDEO FILE {self.video_path}")
         
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -1018,18 +1023,18 @@ class GaugeReaderApp:
         cv2.namedWindow('frame')
         cv2.setMouseCallback('frame', self._mouse_callback)
         
-        cv2.namedWindow('CONTROLS')
-        cv2.createTrackbar('thresh_value',      'CONTROLS',         self.params.thresh_value,           255,    lambda v: setattr(self.params,         'thresh_value',     v))
-        cv2.createTrackbar('thresh_value2',     'CONTROLS',         self.params.thresh_value2,          255,    lambda v: setattr(self.params,         'thresh_value2',    v))
-        cv2.createTrackbar('H_varThreshold',    'CONTROLS',         self.params.var_threshold,          255,    lambda v: setattr(self.params,         'var_threshold',    v))
-        cv2.createTrackbar('ROI Radius',        'CONTROLS',         self.roi_config.radius,             300,    lambda v: setattr(self.roi_config,     'radius',           v))
+        #cv2.namedWindow('CONTROLS')
+        #cv2.createTrackbar('thresh_value',      'CONTROLS',         self.params.thresh_value,           255,    lambda v: setattr(self.params,         'thresh_value',     v))
+        #cv2.createTrackbar('thresh_value2',     'CONTROLS',         self.params.thresh_value2,          255,    lambda v: setattr(self.params,         'thresh_value2',    v))
+        #cv2.createTrackbar('H_varThreshold',    'CONTROLS',         self.params.var_threshold,          255,    lambda v: setattr(self.params,         'var_threshold',    v))
+        #cv2.createTrackbar('ROI Radius',        'CONTROLS',         self.roi_config.radius,             300,    lambda v: setattr(self.roi_config,     'radius',           v))
 
-        cv2.namedWindow('output_thresh')    
-        cv2.createTrackbar('ring_thresh_low',   'output_thresh',    self.params.ring_thresh_low,        255,    lambda v: setattr(self.params,         'ring_thresh_low',  v))
-        cv2.createTrackbar('ring_thresh_high',  'output_thresh',    self.params.ring_thresh_high,       255,    lambda v: setattr(self.params,         'ring_thresh_high', v))
-        cv2.createTrackbar('N regions',         'output_thresh',    self.params.n_regions,              100,    lambda v: setattr(self.params,         'n_regions',        max(1, v)))
+        #cv2.namedWindow('output_thresh')    
+        #cv2.createTrackbar('ring_thresh_low',   'output_thresh',    self.params.ring_thresh_low,        255,    lambda v: setattr(self.params,         'ring_thresh_low',  v))
+        #cv2.createTrackbar('ring_thresh_high',  'output_thresh',    self.params.ring_thresh_high,       255,    lambda v: setattr(self.params,         'ring_thresh_high', v))
+        #cv2.createTrackbar('N regions',         'output_thresh',    self.params.n_regions,              100,    lambda v: setattr(self.params,         'n_regions',        max(1, v)))
         
-        cv2.namedWindow('detected_regions')
+        #cv2.namedWindow('detected_regions')
 
     def _mouse_callback(self, event, x, y, flags, param):
         
@@ -1038,14 +1043,14 @@ class GaugeReaderApp:
                 self.handle_calibration_click(x, y)
             else:
                 self.roi_config.center_x, self.roi_config.center_y = x, y
-                print(f"Circle center set to ({x}, {y})")
+                print(f">>> CIRCLE CENTER SET TO ({x}, {y})")
 
+    ##### CASTRO 26/02/2026 - CENSUREI MAS É MELHOR DEIXAR POR AÍ
     def register_position(self):
-        
         pass
 
+    ##### CASTRO 26/02/2026 - CENSUREI MAS É MELHOR DEIXAR POR AÍ
     def calculate_all_angles(self):
-        
         pass
 
     def run(self):
@@ -1066,17 +1071,18 @@ class GaugeReaderApp:
             else:
                 original_frame = self.frame if self.frame is not None else np.zeros((480, 640, 3), dtype=np.uint8)
             
-            result_frame = self.process_frame(original_frame)
+            result_frame, display = self.process_frame(original_frame)
             
             if result_frame is not None:
                 cv2.imshow("app", result_frame)
+                cv2.imshow("DISPLAY", display)
             
             cv2.imshow('frame', original_frame)
             
             key = cv2.waitKey(1) & 0xFF
             
             if key == ord('q'):
-                print("\nExiting application...")
+                print("\n>>> EXITING APPLICATION")
                 break
             elif key == 32:  
                 self.register_position()
@@ -1084,22 +1090,22 @@ class GaugeReaderApp:
                 self.calculate_all_angles()
             elif key == ord('p'):
                 self.paused = not self.paused
-                print(f"Video {'paused' if self.paused else 'resumed'}")
+                print(f">>> VIDEO {'PAUSEE' if self.paused else 'RESUME'}")
             elif key == ord('r'):
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 self.state.frame_counter = 0
                 self.gauge_data.reset_tracking()
-                print("Video and tracking reset")
+                print(">>> VIDEO AND TRACKING RESET")
             elif key == ord('m'): 
                 self.enter_calibration_mode()
             elif key == ord('x'):  
                 self.gauge_data.reset_tracking()
-                print("Crossing trackers reset")
+                print(">>> CROSSING TARGETS RESET")
             elif key == 27:  
                 if self.state.calibration_mode:
                     self.exit_calibration_mode()
                 else:
-                    print("\nExiting application...")
+                    print("\n>>> EXITING APPLICATION")
                     break
             
             self.state.frame_counter += 1
@@ -1108,10 +1114,10 @@ class GaugeReaderApp:
         cv2.destroyAllWindows()
         plt.ioff()
         plt.close('all')
-        print("\nApplication closed.")
+        print("\n>>> APPLICATION CLOSED")
 
 # ===========
-# ENTRY POINT
+# É AQUI QUE COMEÇA
 # ============================================================================
 
 if __name__ == "__main__":
