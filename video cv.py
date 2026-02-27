@@ -666,7 +666,11 @@ class Visualizer:
     @staticmethod
     def draw_display_info(frame: np.ndarray, gauge_data: GaugeData, state: ProcessingState):
         
-        cv2.putText(frame, str(f'{gauge_data.current_read} [{gauge_data.unit}]'), (35, 100), cv2.FONT_HERSHEY_DUPLEX, 3, (255, 255, 255), 2)
+        if gauge_data.current_read > 0:
+            cv2.putText(frame, str(f'{gauge_data.current_read} [{gauge_data.unit}]'), (35, 100), cv2.FONT_HERSHEY_DUPLEX, 3, (255, 255, 255), 2)
+            
+        else:
+            cv2.putText(frame, str(f''), (35, 100), cv2.FONT_HERSHEY_DUPLEX, 3, (255, 255, 255), 2)
 
         if gauge_data.warning_max_instant == True:
             cv2.putText(frame, str(f'Warning'), (35, 225), cv2.FONT_HERSHEY_DUPLEX, 3, (0, 0, 255), 2)
