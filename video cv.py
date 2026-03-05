@@ -4,6 +4,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple, Dict, Any, Set
 import matplotlib.pyplot as plt
+
+import decimal
 from enum import Enum
 
 ###### ESCREVI ESSE CÓDIGO AQUI OUVINDO "BUNDY" - ANIMAL ALPHA
@@ -34,7 +36,7 @@ class CameraParams:
 @dataclass
 class ProcessingParams:
     n_regions:              int =                       40
-    min_region_area:        int =                       10
+    min_region_area:        int =                       5
     canny1:                 int =                       10
     canny2:                 int =                       255
     thresh_value:           int =                       214
@@ -46,11 +48,11 @@ class ProcessingParams:
     max_radius:             int =                       100
     distance:               int =                       201
     history:                int =                       300
-    var_threshold:          int =                       120
+    var_threshold:          int =                       10
     gamma:                  float =                     1.0
     alpha:                  float =                     1.5
     beta:                   float =                     0.0
-    min_contour_area:       int =                       15
+    min_contour_area:       int =                       5
     ring_scale_factor:      float =                     0.8
     ring_thresh_low:        int =                       170
     ring_thresh_high:       int =                       255
@@ -118,10 +120,10 @@ class GaugeData:
     max_crossed:            bool =                  False    
 
     ###### CASTRO 25/02/2026 - PARÂMETROS DO INDICADOR
-    min_value:              float =                 2
-    max_value:              float =                 60
-    res:                    int =                   2
-    unit:                   str =                   "mca"
+    min_value:              float =                 0
+    max_value:              float =                 4
+    res:                    int =                   0.1
+    unit:                   str =                   "kgf/cm²"
 
     total_angle_span:       float =                 0.0
     current_read:           float =                 0.0
@@ -154,7 +156,7 @@ class GaugeData:
             return 0.0
         return self.max_line.angle_from_min
     
-    ##### CASTRO 25/02/2026 - DECIDI QUE EM VEZ DE DESENHAR TUDO A TODO MOMENTO NOS FRAMES, VOU DESENHAR SÓ EM UM FRAME E TORNAR AS LINHAS PERMANENTES
+    ##### CASTRO 25/02/2026 - DECIDI QUE EM VEZ DE DESENHAR TUDO NOS FRAMES, VOU DESENHAR SÓ EM UM FRAME E TORNAR AS LINHAS PERMANENTES
     def reset_calibration(self):
         self.min_line = None
         self.max_line = None
@@ -388,10 +390,10 @@ class ImageProcessor:
             for i, region in enumerate(stats[0:50]):
                 x, y, w, h = region[cv2.CC_STAT_LEFT:cv2.CC_STAT_HEIGHT+1]
                 cv2.rectangle(display_img, (x, y), (x + w, y + h), (255, 0, 0), 1)
-            #cv2.imshow('detected_regions', display_img)
+            cv2.imshow('detected_regions', display_img)
     
     def draw_lines_on_frame(self, result_frame: np.ndarray, original_frame: np.ndarray, lines: List[LineData], gauge_data: GaugeData):
-        ###### CASTRO 25/02/2026 - ESTA FUNÇÃO AGORA DESENHA AS LINHAS PERMANENTES
+        ###### CASTRO 25/02/2026 - FUNÇÃO AGORA DESENHA AS LINHAS PERMANENTES
         for i, line in enumerate(lines):
             cv2.line(result_frame, line.center, line.centroid, (90, 90, 90), 1)
             cv2.line(original_frame, line.center, line.centroid, (0, 0, 125), 1)
@@ -442,10 +444,7 @@ class ImageProcessor:
         white_bg = cv2.bitwise_and(white_background, white_background, mask=mask_bg)
         final_image = cv2.add(ring_from_original, white_bg)
 
-        x1 = max(0, center_x - outer_r)
-        y1 = max(0, center_y - outer_r)
-        x2 = min(ww, center_x + outer_r)
-        y2 = min(hh, center_y + outer_r)
+        x1, y1, x2, y2 = max(0, center_x - outer_r), max(0, center_y - outer_r), min(ww, center_x + outer_r), min(hh, center_y + outer_r)
         
         cropped = final_image[y1:y2, x1:x2]
         offset = (x1, y1)
@@ -455,6 +454,7 @@ class ImageProcessor:
     @staticmethod
     def enhance_image(frame: np.ndarray, alpha: float, beta: float) -> np.ndarray:
         ###### CASTRO 25/02/2026 - TACA UMA ELEVAÇÃO DE CONTRASTE E BOLA PRA FRENTE
+        
         return cv2.convertScaleAbs(frame, alpha=alpha, beta=beta)
     
     @staticmethod
@@ -496,8 +496,10 @@ class NeedleDetector:
     
     def detect_circle(self, gray: np.ndarray, roi_config: Optional[ROIConfig] = None) -> Optional[Tuple[int, int, int]]:
         if roi_config and roi_config.selected:
-            return (roi_config.center_x, roi_config.center_y, roi_config.radius)
-        
+           return (roi_config.center_x, roi_config.center_y, roi_config.radius)
+
+        circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, self.params.dp, self.params.distance,param1=self.params.param1, param2=self.params.param2,minRadius=self.params.min_radius, maxRadius=self.params.max_radius)
+
         if circles is not None:
             circles = np.round(circles[0, :]).astype("int")
             x, y, r = circles[0]
@@ -523,7 +525,7 @@ class NeedleDetector:
         
         _, mask_thresh =    cv2.threshold(fg_mask_circular, self.params.thresh_value,self.params.thresh_value2, cv2.THRESH_BINARY)
         
-        #cv2.imshow('mask_thresh', mask_thresh)
+        cv2.imshow('mask_thresh', mask_thresh)
         
         kernel =            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
         mask_eroded =       cv2.morphologyEx(mask_thresh, cv2.MORPH_OPEN, kernel)
@@ -579,7 +581,6 @@ class NeedleDetector:
         
         intersection_x, intersection_y = int(local_x + dx_norm * local_r), int(local_y + dy_norm * local_r)
         
-        # Se tem offset, converte de volta para coordenadas originais para o NeedleData
         if offset:
             abs_centroid = (centroid[0] + offset[0], centroid[1] + offset[1])
             abs_tip = (tip_x + offset[0], tip_y + offset[1])
@@ -661,6 +662,10 @@ class Visualizer:
                     #if line.circle_intersection:
                         #cv2.circle(frame, line.circle_intersection, 3, (255, 255, 0), -1)
                     
+                    d = decimal.Decimal(f'{gauge_data.res}')
+                    result = d.as_tuple().exponent
+                    positive_result = abs(result)
+                    line.res = round(line.res,positive_result)
                     cv2.putText(frame, str(line.res), line.extended_end_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
     
     @staticmethod
@@ -770,6 +775,7 @@ class GaugeReaderApp:
                 self.gauge_data.detected_lines = lines
                 
                 print(f">>> len_lines: {len(lines)}")
+            
                 return len(lines) > 0
         
         return False
@@ -950,11 +956,12 @@ class GaugeReaderApp:
         if not self.state.calibration_mode:
             ###### CASTRO 26/02/2026 - DALE AGORA ISOLEI O VERSO DO PONTEIRO PARA NÃO DAR FALSO-POSITIVO NA MEDIÇÃO
             ###### CASTRO 26/02/2026 - EM ALGUMA HORA ESSAS CONSTANTES TEM DE VIRAR UM PARÂMETRO
-            inner_radius = int(r * 0.5)
+            ###### CASTRO 02/03/2026 - BELEZA AGORA O BGL TEM QUE VIRAR UM PARÂMETRO POIS NOS VÍDEOS GRAVADOS COM OUTROS MANÔMETROS, A REGIÃO CONSIDEROU O LADO OPOSTO DO PONTEIRO TAMBÉM
+            inner_radius = int(r * 0.7)
             outer_radius = int(r + r * 0.2)
             
             ring_cropped, offset = self.image_processor.crop_ring_area(enhanced_frame, x, y, inner_radius, outer_radius)
-            #cv2.imshow('ring_cropped', ring_cropped)
+            cv2.imshow('ring_cropped', ring_cropped)
             
             needle = self.needle_detector.extract_needle(ring_cropped, circle_data, mask, self.gauge_data, offset)
                 #cv2.imshow('enhanced_frame',enhanced_frame)
@@ -1027,18 +1034,18 @@ class GaugeReaderApp:
         cv2.namedWindow('frame')
         cv2.setMouseCallback('frame', self._mouse_callback)
         
-        #cv2.namedWindow('CONTROLS')
-        #cv2.createTrackbar('thresh_value',      'CONTROLS',         self.params.thresh_value,           255,    lambda v: setattr(self.params,         'thresh_value',     v))
-        #cv2.createTrackbar('thresh_value2',     'CONTROLS',         self.params.thresh_value2,          255,    lambda v: setattr(self.params,         'thresh_value2',    v))
-        #cv2.createTrackbar('H_varThreshold',    'CONTROLS',         self.params.var_threshold,          255,    lambda v: setattr(self.params,         'var_threshold',    v))
-        #cv2.createTrackbar('ROI Radius',        'CONTROLS',         self.roi_config.radius,             300,    lambda v: setattr(self.roi_config,     'radius',           v))
+        cv2.namedWindow('CONTROLS')
+        cv2.createTrackbar('thresh_value',      'CONTROLS',         self.params.thresh_value,           255,    lambda v: setattr(self.params,         'thresh_value',     v))
+        cv2.createTrackbar('thresh_value2',     'CONTROLS',         self.params.thresh_value2,          255,    lambda v: setattr(self.params,         'thresh_value2',    v))
+        cv2.createTrackbar('H_varThreshold',    'CONTROLS',         self.params.var_threshold,          255,    lambda v: setattr(self.params,         'var_threshold',    v))
+        cv2.createTrackbar('ROI Radius',        'CONTROLS',         self.roi_config.radius,             300,    lambda v: setattr(self.roi_config,     'radius',           v))
 
-        #cv2.namedWindow('output_thresh')    
-        #cv2.createTrackbar('ring_thresh_low',   'output_thresh',    self.params.ring_thresh_low,        255,    lambda v: setattr(self.params,         'ring_thresh_low',  v))
-        #cv2.createTrackbar('ring_thresh_high',  'output_thresh',    self.params.ring_thresh_high,       255,    lambda v: setattr(self.params,         'ring_thresh_high', v))
-        #cv2.createTrackbar('N regions',         'output_thresh',    self.params.n_regions,              100,    lambda v: setattr(self.params,         'n_regions',        max(1, v)))
+        cv2.namedWindow('output_thresh')    
+        cv2.createTrackbar('ring_thresh_low',   'output_thresh',    self.params.ring_thresh_low,        255,    lambda v: setattr(self.params,         'ring_thresh_low',  v))
+        cv2.createTrackbar('ring_thresh_high',  'output_thresh',    self.params.ring_thresh_high,       255,    lambda v: setattr(self.params,         'ring_thresh_high', v))
+        cv2.createTrackbar('N regions',         'output_thresh',    self.params.n_regions,              100,    lambda v: setattr(self.params,         'n_regions',        max(1, v)))
         
-        #cv2.namedWindow('detected_regions')
+        cv2.namedWindow('detected_regions')
 
     def _mouse_callback(self, event, x, y, flags, param):
         
@@ -1125,6 +1132,7 @@ class GaugeReaderApp:
 # ============================================================================
 
 if __name__ == "__main__":
-    video_path = r'record 0 new.mp4'
+    #video_path = r'record 0 new.mp4'
+    video_path = r'm11 new.mp4'
     app = GaugeReaderApp(video_path)
     app.run()
