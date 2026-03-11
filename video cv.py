@@ -23,15 +23,15 @@ class CalibrationStage(Enum):
 @dataclass
 class CameraParams:
     
-    fx:                     float =                     426.7231198260606
-    fy:                     float =                     424.44185129184774
+    fx:                     float =                     1295.464408145378
+    fy:                     float =                     1295.103949906054
     skew:                   float =                     0.0
-    cx:                     float =                     308.3359965293331
-    cy:                     float =                     233.71108395163847
-    width:                  int =                       640
-    height:                 int =                       480
-    r0:                     int =                       2316661
-    r1:                     int =                       -32512066
+    cx:                     float =                     906.6820713859173
+    cy:                     float =                     516.1618641337323
+    width:                  int =                       1920
+    height:                 int =                       1080
+    r0:                     int =                       18037538
+    r1:                     int =                       19169921
 
 @dataclass
 class ProcessingParams:
@@ -65,9 +65,9 @@ class ProcessingParams:
 
 @dataclass                      
 class ROIConfig:                        
-    center_x:               int =                       326
-    center_y:               int =                       267
-    radius:                 int =                       118
+    center_x:               int =                       int(1920/2)
+    center_y:               int =                       int(1080/2)
+    radius:                 int =                       300
     selected:               bool =                      True
 
 @dataclass
@@ -123,7 +123,7 @@ class GaugeData:
     min_value:              float =                 0
     max_value:              float =                 4
     res:                    int =                   0.1
-    unit:                   str =                   "kgf/cm²"
+    unit:                   str =                   "kgf/cm^2"
 
     total_angle_span:       float =                 0.0
     current_read:           float =                 0.0
@@ -158,21 +158,21 @@ class GaugeData:
     
     ##### CASTRO 25/02/2026 - DECIDI QUE EM VEZ DE DESENHAR TUDO NOS FRAMES, VOU DESENHAR SÓ EM UM FRAME E TORNAR AS LINHAS PERMANENTES
     def reset_calibration(self):
-        self.min_line = None
-        self.max_line = None
-        self.is_calibrated = False
+        self.min_line =             None
+        self.max_line =             None
+        self.is_calibrated =        False
         self.permanent_lines.clear()
-        self.lines_captured = False
+        self.lines_captured =       False
         self.tick_mark_angles.clear()
         self.scale_values.clear()
         self.crossed_angles.clear()
-        self.max_crossed = False
-        self.warning_max_flag = False
-        self.warning_max_instant = False
-        self.current_read = 0.0
-        self.total_angle_span = 0.0
+        self.max_crossed =          False
+        self.warning_max_flag =     False
+        self.warning_max_instant =  False
+        self.current_read =         0.0
+        self.total_angle_span =     0.0
 
-# ========================
+# =======================
 # ESTADO DE PROCESSAMENTO
 # ============================================================================
 
@@ -184,7 +184,7 @@ class ProcessingState:
         self.calibration_stage:     CalibrationStage = CalibrationStage.NOT_CALIBRATING
         self.frozen_frame:          Optional[np.ndarray] = None
 
-# =========================================
+# =============================
 # CAMERA CALIBRATOR (UNCHANGED)
 # ============================================================================
 
@@ -317,7 +317,7 @@ class AngleCalculator:
         
         return intersections
 
-# =========================+
+# ==========================
 # IMAGE PROCESSING UTILITIES
 # ============================================================================
 
@@ -337,6 +337,7 @@ class ImageProcessor:
         gray = cv2.cvtColor(img_copy, cv2.COLOR_BGR2GRAY)
         _, black_mask = cv2.threshold(gray, self.params.threshold_value, 255, cv2.THRESH_BINARY_INV)
 
+        cv2.imshow('black_mask',black_mask)
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(black_mask, connectivity=8)
         
         detected_lines = []
@@ -346,7 +347,7 @@ class ImageProcessor:
             area = stats[label, cv2.CC_STAT_AREA]
             
             ###### CASTRO 25/02/2026 - FIXEI A ÁREA EM 5 MAS TALVEZ TENHA DE REDUZIR PARA INDICADORES COM TRAÇOS MAIS FINOS
-            if area:
+            if area > 2:
                 x,y,w,h = stats[label, cv2.CC_STAT_LEFT],  stats[label, cv2.CC_STAT_TOP],stats[label, cv2.CC_STAT_WIDTH],stats[label, cv2.CC_STAT_HEIGHT]
 
                 centroid = (int(centroids[label][0]), int(centroids[label][1]))
@@ -357,7 +358,7 @@ class ImageProcessor:
                 else:
                     original_centroid = centroid
 
-                line = LineData( centroid=original_centroid, center=gauge_data.center, absolute_angle=self.angle_calculator.calculate_angle_from_vector( original_centroid[0] - gauge_data.center[0], original_centroid[1] - gauge_data.center[1] ) )
+                line = LineData(centroid=original_centroid, center=gauge_data.center, absolute_angle=self.angle_calculator.calculate_angle_from_vector( original_centroid[0] - gauge_data.center[0], original_centroid[1] - gauge_data.center[1]))
 
                 self._calculate_line_intersection(line, gauge_data)
                 
@@ -387,31 +388,18 @@ class ImageProcessor:
         if len(centroids) > 0:
             display_img = img.copy()
             ###### CASTRO 25/02/2026 - AQUI EU TAQUEI COMO CONSTANTE AS 50 REGIÕES DETECTADAS, MAS SEI LÁ, TALVEZ SEJA INSUFICIENTE. NUM FUTURO PRÓXIMO EU CORRIJO PARA TODAS A REGIÕES DETECATADAS
-            for i, region in enumerate(stats[0:50]):
+            ###### CASTRO 03/06/2026 -  FODASE JOGUEI LOGO 3000 PORQUE NÃO TÔ ENTENDENDO MAIS NADA NESSA P
+            ###### PRECI 
+            for i, region in enumerate(stats[0:3000]):
                 x, y, w, h = region[cv2.CC_STAT_LEFT:cv2.CC_STAT_HEIGHT+1]
                 cv2.rectangle(display_img, (x, y), (x + w, y + h), (255, 0, 0), 1)
             cv2.imshow('detected_regions', display_img)
-    
-    def draw_lines_on_frame(self, result_frame: np.ndarray, original_frame: np.ndarray, lines: List[LineData], gauge_data: GaugeData):
-        ###### CASTRO 25/02/2026 - FUNÇÃO AGORA DESENHA AS LINHAS PERMANENTES
-        for i, line in enumerate(lines):
-            cv2.line(result_frame, line.center, line.centroid, (90, 90, 90), 1)
-            cv2.line(original_frame, line.center, line.centroid, (0, 0, 125), 1)
-            
-            if line.is_tick_mark and line.extended_end:
-                ###### CASTRO 25/02/2026 - A LINHA CINZA-CLARO RESSALTA QUAIS REGIÕES SERÃO UTILIZADAS PARA CONTABILIZAR
-                cv2.line(result_frame, line.center, line.extended_end, (200, 200, 200), 1)
-                
-                #if line.circle_intersection:
-                    #cv2.circle(result_frame, line.circle_intersection, 3, (255, 255, 0), -1)
-                
-                ###### CASTRO 25/02/2026 - AGORA VEM O RESULTADO DA RESOLUÇÃO
-                cv2.putText(result_frame, str(line.res), line.extended_end_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
     
     def find_nearest_region(self, click_x: int, click_y: int, component_centroids: List[Tuple[int, int]], offset: Tuple[int, int], max_distance: int = 50) -> Optional[Tuple[int, int]]:
         ###### CASTRO 25/02/2026 - PARA PODER SELECIONAR O MÍNIMO E MÁXIMO, ADICIONEI UMA REGIÃO CIRCULAR PARA DETECTAR SE ALGUM CENTRÓIDE FOI SELECIONADO. 
         ###### DO CONTRÁRIO, USANDO SOMENTE O PIXEL SELECIONADO, FICAVA DIFÍCIL DE CATAR ALGUMA LINHA; PARA NÃO DAR CONFUSÃO, TALVEZ SEJA UMA BOA DEIXAR UM CÍRCULO EM VOLTA DO CURSOR 
         ###### DO MOUSE NESSA JANELA
+
         if not component_centroids or offset is None:
             return None
         
@@ -432,22 +420,22 @@ class ImageProcessor:
     def crop_ring_area(image: np.ndarray, center_x: int, center_y: int, inner_r: int, outer_r: int) -> Tuple[np.ndarray, Tuple[int, int]]:
         
     ###### CASTRO 25/02/2026 - TÁ BOM, AQUI É ONDE A DETECÇÃO DOS PONTOS DE MEDIÇÃO ACONTECEM, NÃO É NADA ESPECIAL, SÓ PRECISA SER PICA PARA PENSAR NISSO
-        hh, ww = image.shape[:2]
-        white_background = np.ones((hh, ww, 3), dtype=np.uint8) * 255
+        hh, ww =                image.shape[:2]
+        white_background =      np.ones((hh, ww, 3), dtype=np.uint8) * 255
         
-        mask_ring = np.zeros((hh, ww), dtype=np.uint8)
+        mask_ring =             np.zeros((hh, ww), dtype=np.uint8)
         cv2.circle(mask_ring, (center_x, center_y), outer_r, 255, -1)
         cv2.circle(mask_ring, (center_x, center_y), inner_r, 0, -1)
         
-        ring_from_original = cv2.bitwise_and(image, image, mask=mask_ring)
-        mask_bg = cv2.bitwise_not(mask_ring)
-        white_bg = cv2.bitwise_and(white_background, white_background, mask=mask_bg)
-        final_image = cv2.add(ring_from_original, white_bg)
+        ring_from_original =    cv2.bitwise_and(image, image, mask=mask_ring)
+        mask_bg =               cv2.bitwise_not(mask_ring)
+        white_bg =              cv2.bitwise_and(white_background, white_background, mask=mask_bg)
+        final_image =           cv2.add(ring_from_original, white_bg)
 
-        x1, y1, x2, y2 = max(0, center_x - outer_r), max(0, center_y - outer_r), min(ww, center_x + outer_r), min(hh, center_y + outer_r)
+        x1, y1, x2, y2 =        max(0, center_x - outer_r), max(0, center_y - outer_r), min(ww, center_x + outer_r), min(hh, center_y + outer_r)
         
-        cropped = final_image[y1:y2, x1:x2]
-        offset = (x1, y1)
+        cropped =               final_image[y1:y2, x1:x2]
+        offset =                (x1, y1)
         
         return cropped, offset
     
@@ -492,7 +480,7 @@ class NeedleDetector:
         self.params = params
         self.app = app
         self.ring_processor = RingProcessor(params, self)
-        self.backSub = cv2.createBackgroundSubtractorMOG2(history=params.history,varThreshold=params.var_threshold,detectShadows=True)
+        self.backSub = cv2.createBackgroundSubtractorMOG2(history=params.history,varThreshold=params.var_threshold,detectShadows=False)
     
     def detect_circle(self, gray: np.ndarray, roi_config: Optional[ROIConfig] = None) -> Optional[Tuple[int, int, int]]:
         if roi_config and roi_config.selected:
@@ -515,17 +503,22 @@ class NeedleDetector:
         else:
             local_x, local_y, local_r = x, y, r
         
-        h, w = frame.shape[:2]
-        local_mask = np.zeros((h, w), dtype=np.uint8)
+        h, w =              frame.shape[:2]
+        local_mask =        np.zeros((h, w), dtype=np.uint8)
         cv2.circle(local_mask, (local_x, local_y), local_r, 255, -1)
         
-        fg_mask_full = self.backSub.apply(frame)
-        
+        cv2.imshow('frame2',frame)
+        ##### CASTRO 05/03/2026 - PRECISO ENCONTRAR UM ALGORITMO PARA EQUILIBRAR THRESHOLD
+        ##### FIXEI 153 POIS ELE FUNCIONA COM O VÍDEO 'm11 new.mp4'
+        _, mask_thresh =    cv2.threshold(frame, 153 ,self.params.thresh_value2, cv2.THRESH_BINARY)
+
+        cv2.imshow('mask_thresh',mask_thresh)
+
+        fg_mask_full =      self.backSub.apply(mask_thresh)
         fg_mask_circular =  cv2.bitwise_and(fg_mask_full, fg_mask_full, mask=local_mask)
-        
         _, mask_thresh =    cv2.threshold(fg_mask_circular, self.params.thresh_value,self.params.thresh_value2, cv2.THRESH_BINARY)
         
-        cv2.imshow('mask_thresh', mask_thresh)
+        #cv2.imshow('mask_thresh', mask_thresh)
         
         kernel =            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
         mask_eroded =       cv2.morphologyEx(mask_thresh, cv2.MORPH_OPEN, kernel)
@@ -1038,7 +1031,11 @@ class GaugeReaderApp:
         cv2.createTrackbar('thresh_value',      'CONTROLS',         self.params.thresh_value,           255,    lambda v: setattr(self.params,         'thresh_value',     v))
         cv2.createTrackbar('thresh_value2',     'CONTROLS',         self.params.thresh_value2,          255,    lambda v: setattr(self.params,         'thresh_value2',    v))
         cv2.createTrackbar('H_varThreshold',    'CONTROLS',         self.params.var_threshold,          255,    lambda v: setattr(self.params,         'var_threshold',    v))
-        cv2.createTrackbar('ROI Radius',        'CONTROLS',         self.roi_config.radius,             300,    lambda v: setattr(self.roi_config,     'radius',           v))
+        #cv2.createTrackbar('ROI Radius',        'CONTROLS',         self.roi_config.radius,            300,    lambda v: setattr(self.roi_config,     'radius',           v))
+        
+        ##### CASTRO 05/03/2026 - PRECISO ENCONTRAR UM ALGORITMO PARA IDENTIFICAR O CÍRCULO SOZINHO E ESTÁVEL OUTRA VEZ
+        ##### FIXEI 76 POIS ELE FUNCIONA COM O VÍDEO 'm11 new.mp4'
+        cv2.createTrackbar('ROI Radius',        'CONTROLS',                                 95,         300,    lambda v: setattr(self.roi_config,     'radius',           v))
 
         cv2.namedWindow('output_thresh')    
         cv2.createTrackbar('ring_thresh_low',   'output_thresh',    self.params.ring_thresh_low,        255,    lambda v: setattr(self.params,         'ring_thresh_low',  v))
@@ -1076,11 +1073,11 @@ class GaugeReaderApp:
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 
-                frame = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_LANCZOS4)
+                frame = cv2.resize(frame, (1920, 1080), interpolation=cv2.INTER_LANCZOS4)
                 frame = self.calibrator.undistort(frame)
                 original_frame = frame.copy()
             else:
-                original_frame = self.frame if self.frame is not None else np.zeros((480, 640, 3), dtype=np.uint8)
+                original_frame = self.frame if self.frame is not None else np.zeros((1080, 1920, 3), dtype=np.uint8)
             
             result_frame, display = self.process_frame(original_frame)
             
@@ -1133,6 +1130,6 @@ class GaugeReaderApp:
 
 if __name__ == "__main__":
     #video_path = r'record 0 new.mp4'
-    video_path = r'm11 new.mp4'
+    video_path = r'video.mp4'
     app = GaugeReaderApp(video_path)
     app.run()
